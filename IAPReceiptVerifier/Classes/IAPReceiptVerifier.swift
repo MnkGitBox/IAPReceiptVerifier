@@ -67,37 +67,43 @@ public struct IAPReceiptVerifier {
 
     public func verify(completion: @escaping (Receipt?, VerifyError) -> ()) {
         guard let receiptURL = Bundle.main.appStoreReceiptURL,
-            let receiptData = try? Data(contentsOf: receiptURL) else {
-                return
+              let receiptData = try? Data(contentsOf: receiptURL) else {
+            completion(nil, .noReceipet)
+            return
         }
-
+        
+        guard Reacherbility.isInternetAccessible else{
+            completion(nil,.noInternet)
+            return
+        }
+        
         let encodedData = receiptData.base64EncodedData(options: [])
         var request = URLRequest(url: url)
         request.httpBody = encodedData
         request.httpMethod = "POST"
-
+        
         let algorithm = SecKeyAlgorithm.rsaSignatureMessagePKCS1v15SHA256
-
+        
         let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
             var error: Unmanaged<CFError>?
-
+            
             guard let data = data,
-                let HTTPResponse = response as? HTTPURLResponse,
-                let object = try? JSONSerialization.jsonObject(with: data, options: []),
-                let json = object as? [String: Any] else {
+                  let HTTPResponse = response as? HTTPURLResponse,
+                  let object = try? JSONSerialization.jsonObject(with: data, options: []),
+                  let json = object as? [String: Any] else {
                 completion(nil, .jsonSerialization)
-                    return
+                return
             }
-
+            
             if let key = self.key {
                 guard let signatureString = HTTPResponse.allHeaderFields["X-Signature"] as? String,
-                    let signature = Data(base64Encoded: signatureString),
-                    SecKeyVerifySignature(key, algorithm, data as CFData, signature as CFData, &error) else {
+                      let signature = Data(base64Encoded: signatureString),
+                      SecKeyVerifySignature(key, algorithm, data as CFData, signature as CFData, &error) else {
                     completion(nil, .secKeyVerify)
-                        return
+                    return
                 }
             }
-
+            
             completion(json, .none)
         }
         task.resume()
@@ -113,3 +119,33 @@ public enum VerifyError: String {
   case undefine
   case none
 }
+
+
+import SystemConfiguration
+struct Reacherbility{
+    
+    static var isInternetAccessible:Bool{
+        
+        var zeroAddress = sockaddr_in(sin_len: 0, sin_family: 0, sin_port: 0, sin_addr: in_addr(s_addr: 0), sin_zero: (0, 0, 0, 0, 0, 0, 0, 0))
+        zeroAddress.sin_len = UInt8(MemoryLayout.size(ofValue: zeroAddress))
+        zeroAddress.sin_family = sa_family_t(AF_INET)
+        
+        let defaultRouteReachability = withUnsafePointer(to: &zeroAddress) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {zeroSockAddress in
+                SCNetworkReachabilityCreateWithAddress(nil, zeroSockAddress)
+            }
+        }
+        
+        var flags: SCNetworkReachabilityFlags = SCNetworkReachabilityFlags(rawValue: 0)
+        if SCNetworkReachabilityGetFlags(defaultRouteReachability!, &flags) == false {
+            return false
+        }
+        
+        let isReachable = (flags.rawValue & UInt32(kSCNetworkFlagsReachable)) != 0
+        let needsConnection = (flags.rawValue & UInt32(kSCNetworkFlagsConnectionRequired)) != 0
+        let result = (isReachable && !needsConnection)
+        
+        return result
+    }
+}
+
