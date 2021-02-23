@@ -65,7 +65,7 @@ public struct IAPReceiptVerifier {
         self.url = url
     }
 
-    public func verify(completion: @escaping (Receipt?) -> ()) {
+    public func verify(completion: @escaping (Receipt?, VerifyError) -> ()) {
         guard let receiptURL = Bundle.main.appStoreReceiptURL,
             let receiptData = try? Data(contentsOf: receiptURL) else {
                 return
@@ -85,7 +85,7 @@ public struct IAPReceiptVerifier {
                 let HTTPResponse = response as? HTTPURLResponse,
                 let object = try? JSONSerialization.jsonObject(with: data, options: []),
                 let json = object as? [String: Any] else {
-                    completion(nil)
+                completion(nil, .jsonSerialization)
                     return
             }
 
@@ -93,13 +93,23 @@ public struct IAPReceiptVerifier {
                 guard let signatureString = HTTPResponse.allHeaderFields["X-Signature"] as? String,
                     let signature = Data(base64Encoded: signatureString),
                     SecKeyVerifySignature(key, algorithm, data as CFData, signature as CFData, &error) else {
-                        completion(nil)
+                    completion(nil, .secKeyVerify)
                         return
                 }
             }
 
-            completion(json)
+            completion(json, .none)
         }
         task.resume()
     }
+}
+
+
+public enum VerifyError: String {
+  case noReceipet
+  case noInternet
+  case jsonSerialization
+  case secKeyVerify
+  case undefine
+  case none
 }
